@@ -88,3 +88,34 @@ An example of using the MATLAB interface is given in {Gauss_Root_Dir}/src/Exampl
 #### Notes for Visual Studio ####
 To build the MATLAB interface using Visual Studio, currnetly you have to manually modify a couple of linker inputs. After building the VS solution using CMake, open it in VS, and go to the linker input for the Gauss_MATLAB project. That is, Gauss_MATLAB (Solution Explorer) > Properties > Linker > Input > Additional Dependencies.
 Change `libmx.dll` to `libmx.lib`, and remove the input `libiomp5.dylib`. Now you should be able to build the MATLAB interface on Windows.
+
+
+#### IMPORTANT ####
+
+```
+# setting libigl include path does not seem to work
+# workaround: clone/link libigl in path where `dyld` looks for by default
+#		i.e. link libigl to `/usr/local/igl`
+git clone --recursive libigl path/to/libigl
+sudo mkdir /usr/local/igl
+sudo ln -s path/to/libigl /usr/local/igl/libigl
+
+# for macOS, there is trouble building GAUSS with OpenMP
+#	possibly because Apple's llvm does not ship with OpenMP
+#	or some kind of problem with versioning of llvm (4.0.1 -> 7.0.1)
+# workaround: Try
+#		1. 
+brew install llvm
+brew install libomp
+#      2. update `config.cmake` `LLVM_INCLUDE` cache to 7.0.1
+
+# Using Pardiso
+#		1. Register an academic licence
+#		2. Download `libpardiso600-MACOS-X86-64.dylib` via link in email, 
+#			put it under `/usr/local/lib/` and update `config.cmake` `PARDISO_LIB` to path of `dylib`
+#		3. Put licence in `pardiso.lic` and place it in home directory `~/` in email
+#		4. Use ccmake to do configuration
+```
+
+
+

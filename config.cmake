@@ -6,7 +6,8 @@
 
 
 ### libigl
-set(LIBIGL_INCLUDE_PATH "${PROJECT_SOURCE_DIR}/extern/libigl/include" CACHE FILEPATH "Root include directory for libigl")
+# set(LIBIGL_INCLUDE_PATH "${PROJECT_SOURCE_DIR}/extern/libigl/include" CACHE FILEPATH "Root include directory for libigl")
+set(LIBIGL_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/ThirdParty/libigl/include" CACHE FILEPATH "Root include directory for libigl")
 
 
 ### OpenMP config
@@ -15,13 +16,13 @@ set(USE_OPENMP ON CACHE BOOL "OpenMP requires use of llvm via homebrew on OSX")
 # These need only be set/updated if you are trying to use OpenMP on OSX and have installed llvm via homebrew
 set(LLVM_BIN "/usr/local/opt/llvm/bin" CACHE STRING "CLANG Binary Directory such as /usr/local/opt/llvm/bin")
 set(LLVM_LIB "/usr/local/opt/llvm/lib" CACHE STRING "CLANG Lib Directory such as /usr/local/opt/llvm/lib")
-set(LLVM_INCLUDE "/usr/local/opt/llvm/lib/clang/4.0.1/include" CACHE STRING "CLANG Header Directory such as /usr/local/opt/llvm/include")
+set(LLVM_INCLUDE "/usr/local/opt/llvm/lib/clang/7.0.1/include" CACHE STRING "CLANG Header Directory such as /usr/local/opt/llvm/include")
 
 set(CMAKE_C_COMPILER ${LLVM_BIN}/clang CACHE PATH "C compiler" FORCE)
 set(CMAKE_CXX_COMPILER ${LLVM_BIN}/clang++ CACHE PATH "C++ compiler" FORCE)
 
 ### Paradiso
-set(USE_PARDISO OFF CACHE BOOL "Use Pardiso if it is available to you")
+set(USE_PARDISO ON CACHE BOOL "Use Pardiso if it is available to you")
 
 # If USE_PARDISO is ON then we need a path to find it
-set(PARDISO_LIB "/usr/local/lib/libpardiso500-MACOS-X86-64.dylib" CACHE STRING "Pardiso Library to use")
+set(PARDISO_LIB "/usr/local/lib/libpardiso600-MACOS-X86-64.dylib" CACHE STRING "Pardiso Library to use")
