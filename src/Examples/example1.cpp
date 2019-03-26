@@ -1,70 +1,155 @@
 #include <GaussIncludes.h>
-#include <Qt3DIncludes.h>
-
+#include <FEMIncludes.h>
+#include <iostream>
+ 
 #include <PhysicalSystemParticles.h>
 #include <TimeStepperEulerImplicitLinear.h>
 #include <ForceSpring.h>
 #include <ConstraintFixedPoint.h>
+#include <SolverPardiso.h>
+
+#include <igl/readMESH.h>
+#include <igl/boundary_facets.h>
+#include <igl/opengl/glfw/Viewer.h>
+#include <igl/opengl/glfw/imgui/ImGuiMenu.h>
+#include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
+#include <imgui/imgui.h>
+#include <AssemblerParallel.h>
+
+//solver
+#include <igl/active_set.h>
+
+
+//Global variables for UI
+igl::opengl::glfw::Viewer viewer;
+
+SolverPardiso<Eigen::SparseMatrix<double, Eigen::RowMajor>> m_pardiso;
 
 using namespace Gauss;
-using namespace ParticleSystem;
+using namespace Gauss::FEM;
 
 /* Particle Systems */
 
-typedef World<double,
-              std::tuple<PhysicalSystemParticleSingle<double> *>,
-              std::tuple<ForceSpringParticles<double> *>,
-              std::tuple<ConstraintFixedPoint<double> *> >  MyWorld;
+//Setup the FE System
+typedef PhysicalSystemFEM<double, LinearTet> LinearFEM;
 
-typedef TimeStepperEulerImplicitLinear<double,
-                                      Assembler<double, AssemblerImplEigenSparseMatrix>,
-                                      Assembler<double, AssemblerImplEigenVector> > MyTimeStepper;
+typedef World<double, std::tuple<LinearFEM *>,
+std::tuple<ForceSpringFEMParticle<double> *>,
+std::tuple<ConstraintFixedPoint<double> *> > SimWorld;
 
-typedef Scene<MyWorld, MyTimeStepper> MyScene;
+//This code from libigl boundary_facets.h
+void tetsToTriangles(Eigen::MatrixXi &Fout, Eigen::MatrixXi T) {
+    
+    unsigned int simplex_size = 4;
+    std::vector<std::vector<int> > allF(
+                                   T.rows()*simplex_size,
+                                        std::vector<int>(simplex_size-1));
+    
+    // Gather faces, loop over tets
+    for(int i = 0; i< (int)T.rows();i++)
+    {
+        // get face in correct order
+        allF[i*simplex_size+0][0] = T(i,2);
+        allF[i*simplex_size+0][1] = T(i,3);
+        allF[i*simplex_size+0][2] = T(i,1);
+        // get face in correct order
+        allF[i*simplex_size+1][0] = T(i,3);
+        allF[i*simplex_size+1][1] = T(i,2);
+        allF[i*simplex_size+1][2] = T(i,0);
+        // get face in correct order
+        allF[i*simplex_size+2][0] = T(i,1);
+        allF[i*simplex_size+2][1] = T(i,3);
+        allF[i*simplex_size+2][2] = T(i,0);
+        // get face in correct order
+        allF[i*simplex_size+3][0] = T(i,2);
+        allF[i*simplex_size+3][1] = T(i,1);
+        allF[i*simplex_size+3][2] = T(i,0);
+    }
+    
+    Fout.resize(allF.size(), simplex_size-1);
+    for(unsigned int ii=0; ii<allF.size(); ++ii) {
+        Fout(ii,0) = allF[ii][0];
+        Fout(ii,1) = allF[ii][1];
+        Fout(ii,2) = allF[ii][2];
+    }
+}
+
 
 
 int main(int argc, char **argv)
 {
     std::cout<<"Example 1\n";
 
-    //Setup Physics
-    MyWorld world;
-    PhysicalSystemParticleSingle<double> *test =
-    new PhysicalSystemParticleSingle<double>();
+    Eigen::MatrixXd V,C;
+    Eigen::MatrixXi T,F;
+    Eigen::VectorXd s;
+    Eigen::VectorXi N;
     
-    PhysicalSystemParticleSingle<double> *test1 =
-    new PhysicalSystemParticleSingle<double>();
-    
-    
-    ForceSpringParticles<double> *forceSpring = new ForceSpringParticles<double>(PosParticle<double>(&test->getQ()),
-                                                                                 PosParticle<double>(&test1->getQ()),
-                                                                                 5.0, 200.0);
-    
-    world.addSystem(test);
-    world.addSystem(test1);
-    world.addForce(forceSpring);
-    world.finalize(); //After this all we're ready to go (clean up the interface a bit later)
-    
-    MyTimeStepper stepper(0.001);
-    
-    
-    auto q = mapStateEigen(world);
-    q.setZero();
-    
-    auto q1 = mapDOFEigen(test1->getQ(), world);
-    q1[0] = 10.0;
-    
-   
-    
-    //Start Display
-    QGuiApplication app(argc, argv);
+    //Setup shape
+    igl::readMESH(dataDir()+"/meshesTetWild/archbridge.mesh", V, T, F); // dataDir using namespace
 
-	//Setup Scene
-	MyScene *scene = new MyScene(&world, &stepper);
+    tetsToTriangles(F, T);
 
-    GAUSSVIEW(scene);
-    gaussView.startScene();
+    //Setup simulation code
+    SimWorld world;
+    LinearFEM *fem = new LinearFEM(V, T);
+    world.addSystem(fem);
+    world.finalize();
+
+    //Assemble Stiffness Matrix and get forces
+    AssemblerParallel<double, AssemblerEigenSparseMatrix<double>> K;
+    AssemblerParallel<double, AssemblerEigenVector<double>> f;
+    getStiffnessMatrix(K, world);
+    getForceVector(f, world);
+
+    //Project out fixed boundary
+    Eigen::VectorXi fixedVertices = minVertices(fem, 1, 1e-3);
+    //increase gravity
+    Eigen::Vector3d g = {0.f, -100.f, 0.f};
+    for(unsigned int ii=0; ii<fem->getImpl().getElements().size(); ++ii) {
+        fem->getImpl().getElements()[ii]->setGravity(g);
+    }
+
+    Eigen::SparseMatrix<double> P = fixedPointProjectionMatrix(fixedVertices, *fem, world);
+    Eigen::SparseMatrix<double> Kp = P*(*K)*P.transpose();
+    Eigen::VectorXd fp = P*(*f);
+
+    Eigen::SparseMatrix<double, Eigen::RowMajor> KpR = Kp;
+    m_pardiso.symbolicFactorization(KpR);
+    m_pardiso.numericalFactorization();
     
-    return app.exec();
+    m_pardiso.solve(fp);
+    mapStateEigen<0>(world) = P.transpose()*m_pardiso.getX();
+    
+    // //Solve and project back to the full space
+    // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> LDLT(Kp);
+    // mapStateEigen<0>(world) = P.transpose()*LDLT.solve(fp);
+    
+    //Display norm of stress
+    C.resize(V.rows(),3);
+    N.resize(V.rows());
+    N.setZero();
+    Eigen::Matrix3d S;
+    s.resize(V.rows());
+
+    for(unsigned int ii=0; ii< T.rows(); ii++) {
+        for(unsigned int jj=0; jj<4; ++jj) {
+            N[T(ii,jj)] += 1; //get normalization values for each vertex
+        }
+    }
+
+    for(unsigned int ii=0; ii< T.rows(); ii++) {
+        for(unsigned int jj=0; jj<4; ++jj) {
+            fem->getImpl().getElement(ii)->getCauchyStress(S, Vec3d(0,0,0), world.getState());
+            s(T(ii,jj)) += S.norm()/static_cast<double>(N(T(ii,jj)));
+        }
+    }
+
+    igl::jet(s, 0, 100000, C);
+    viewer.data().set_mesh(V, F);
+    viewer.data().set_colors(C);
+    viewer.launch();
+
+    return 0;
 }
 
